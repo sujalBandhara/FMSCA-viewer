@@ -1,20 +1,18 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { AgGridReact } from "ag-grid-react";
+import "ag-grid-community/styles/ag-grid.css";
+import "ag-grid-community/styles/ag-theme-alpine.css";
+import "ag-grid-enterprise";
 import Papa from "papaparse";
-import TableView from "./components/TableView";
-import PivotTable from "./components/PivotTableView";
-import CircularProgress from "@mui/material/CircularProgress";
-import Backdrop from "@mui/material/Backdrop";
-import { StyledPaper, StyledTitle, ToggleButton, StyledHeader } from "./styles";
+import { StyledHeader, StyledTitle, CustomSkeleton } from "./styles";
+import moment from "moment";
 
-const FMSCAViewer = () => {
-  const [data, setData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [viewLoading, setViewLoading] = useState(false);
-  const [view, setView] = useState("tableView");
+const FMSCAView = () => {
+  const [loading, setLoading] = useState(true);
+  const [rowData, setRowData] = useState([]);
+  const [columnDefs, setColumnDefs] = useState([]);
 
   useEffect(() => {
-    setLoading(true);
-
     fetch("/data/FMSCA.csv")
       .then((response) => response.text())
       .then((csvData) => {
@@ -22,7 +20,44 @@ const FMSCAViewer = () => {
           header: true,
           dynamicTyping: true,
           complete: (results) => {
-            setData(results.data);
+            const data = results.data.map((row) => {
+              const formattedDate = row.out_of_service_date
+                ? moment(row.out_of_service_date, "MM/DD/YYYY").format(
+                    "YYYY-MM-DD"
+                  )
+                : null;
+              return {
+                ...row,
+                out_of_service_date: formattedDate,
+                month_year: formattedDate
+                  ? moment(formattedDate, "YYYY-MM-DD").format("YYYY-MM")
+                  : null,
+              };
+            });
+
+            setRowData(data);
+
+            if (data.length > 0) {
+              const keys = Object.keys(data[0]);
+              setColumnDefs(
+                keys.map((key) => ({
+                  headerName: key,
+                  field: key,
+                  sortable: true,
+                  filter: true,
+                  enableRowGroup: true,
+                  enablePivot: true,
+                  enableValue: true,
+                  cellRenderer:
+                    key === "out_of_service_date"
+                      ? (params) =>
+                          moment(params.value, "YYYY-MM-DD").format(
+                            "YYYY-MM-DD"
+                          )
+                      : undefined,
+                }))
+              );
+            }
             setLoading(false);
           },
           error: (error) => {
@@ -37,39 +72,47 @@ const FMSCAViewer = () => {
       });
   }, []);
 
-  const handleViewSwitch = () => {
-    setViewLoading(true);
-    setTimeout(() => {
-      setView(view === "tableView" ? "pivotTable" : "tableView");
-      setViewLoading(false);
-    }, 500);
-  };
+  const memoizedColumnDefs = useMemo(() => columnDefs, [columnDefs]);
 
   return (
-    <StyledPaper>
+    <div style={{ height: "100vh", width: "100%", overflow: "auto" }}>
       <StyledHeader>
         <StyledTitle>FMSCA</StyledTitle>
-        <ToggleButton onClick={handleViewSwitch}>
-          {view === "tableView" ? "Pivot Table" : "Table View"}
-        </ToggleButton>
       </StyledHeader>
 
-      <Backdrop
-        style={{ zIndex: 1000, color: "#fff" }}
-        open={loading || viewLoading}
-      >
-        <CircularProgress color="inherit" />
-      </Backdrop>
-
-      {data.length > 0 &&
-        !viewLoading &&
-        (view === "tableView" ? (
-          <TableView data={data} />
+      <div className="ag-theme-alpine" style={{ height: "92%", width: "100%" }}>
+        {loading ? (
+          <div style={{ padding: "15px" }}>
+            <CustomSkeleton variant="rectangular" width="100%" height={50} />
+            {Array.from({ length: 18 }).map((_, index) => (
+              <CustomSkeleton
+                key={index}
+                variant="rectangular"
+                width="100%"
+                height={30}
+              />
+            ))}
+          </div>
         ) : (
-          <PivotTable data={data} />
-        ))}
-    </StyledPaper>
+          <AgGridReact
+            columnDefs={memoizedColumnDefs}
+            rowData={rowData}
+            pivotMode={false}
+            sideBar={{
+              toolPanels: ["columns", "filters", "chart"],
+            }}
+            enableCharts={true}
+            animateRows={true}
+            // groupIncludeFooter={true}
+            // groupIncludeTotalFooter={true}
+            pagination={true}
+            paginationPageSize={100}
+            rowGroupPanelShow="always"
+          />
+        )}
+      </div>
+    </div>
   );
 };
 
-export default FMSCAViewer;
+export default FMSCAView;
